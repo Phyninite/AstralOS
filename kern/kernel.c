@@ -9,6 +9,7 @@
 #include "kprintf.h"
 #include "fs.h"
 #include "block_device.h"
+#include "vfs.h"         
 #include "../drivers/timer/timer.h"
 #include "lib.h"
 
@@ -18,7 +19,6 @@ void dummy_task_func_a() {
     int counter = 0;
     while (1) {
         kprintf("task a running! counter: %d\n", counter);
-        // timer_delay_ms(1000); // replaced with sched_yield in next phase
         counter++;
         sched_yield();
     }
@@ -28,7 +28,6 @@ void dummy_task_func_b() {
     int counter = 0;
     while (1) {
         kprintf("task b running! counter: %d\n", counter);
-        // timer_delay_ms(1500); // replaced with sched_yield in next phase
         counter++;
         sched_yield();
     }
@@ -67,26 +66,18 @@ void kernel_main(uint64_t dtb_addr) {
         crash_core_panic("framebuffer info not found in dtb!\n");
     }
 
-    // ensure framebuffer is mapped as read/write, non-executable
-    // security_enforce_wx(fb_base, fb_height * fb_pitch, VM_PROT_READ | VM_PROT_WRITE);
-    // the vm_maps.c now handles this directly in cpu_enable_mmu for the framebuffer region
-
+    // initialize kprintf with framebuffer parameters
     uint32_t* fb = (uint32_t*)fb_base;
-    
     kprintf_init(fb, fb_width, fb_height, fb_pitch);
 
+    // clear the framebuffer
     for (int i = 0; i < (fb_height * fb_pitch) / 4; i++) {
         fb[i] = 0x00000000;
     }
     
     kprintf("astral os\n");
-    
-    // timer_delay_ms(5000); // removed blocking delay
-    
-    // removed redundant framebuffer clear
 
-    kprintf("> ");
-    
+    // initialize kmalloc with memory range obtained from dtb if available
     uint64_t mem_start, mem_size;
     if (dtb_get_memory_info(&mem_start, &mem_size) == 0) {
         kmalloc_init(mem_start, mem_size);
@@ -94,9 +85,26 @@ void kernel_main(uint64_t dtb_addr) {
         kmalloc_init(0x80000000, 256 * 1024 * 1024);
     }
 
+    // set the active block device and initialize the filesystem layer
     set_active_block_device(BLOCK_DEVICE_TYPE_UFS);
     fs_init();
 
+    // initialize the virtual file system and create the root directory
+    if (vfs_init() != 0) {
+        kprintf("kernel_main: vfs initialization failed!\n");
+    } else {
+        vfs_node_t *root_dir = vfs_get_root();
+        if (!root_dir) {
+            kprintf("kernel_main: could not get root vfs directory\n");
+        } else {
+            // create some basic directories under the root
+            vfs_create_dir(root_dir, "bin");
+            vfs_create_dir(root_dir, "etc");
+            vfs_create_dir(root_dir, "dev");
+            kprintf("vfs root directory initialized with 'bin', 'etc', and 'dev'\n");
+        }
+    }
+    
     sched_init();
     sched_create_task(dummy_task_func_a, 4096);
     sched_create_task(dummy_task_func_b, 4096);
@@ -115,5 +123,3 @@ void kernel_main(uint64_t dtb_addr) {
 void exception_handler(uint64_t sp, uint32_t type) {
     crash_core_panic("unhandled exception type %d at sp 0x%llx\n", type, sp);
 }
-
-
