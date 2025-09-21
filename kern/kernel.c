@@ -18,8 +18,9 @@ void dummy_task_func_a() {
     int counter = 0;
     while (1) {
         kprintf("task a running! counter: %d\n", counter);
-        timer_delay_ms(1000);
+        // timer_delay_ms(1000); // replaced with sched_yield in next phase
         counter++;
+        sched_yield();
     }
 }
 
@@ -27,8 +28,9 @@ void dummy_task_func_b() {
     int counter = 0;
     while (1) {
         kprintf("task b running! counter: %d\n", counter);
-        timer_delay_ms(1500);
+        // timer_delay_ms(1500); // replaced with sched_yield in next phase
         counter++;
+        sched_yield();
     }
 }
 
@@ -61,14 +63,14 @@ void kernel_main(uint64_t dtb_addr) {
         fb_height = bswap32(prop_val[2]);
         fb_pitch = bswap32(prop_val[3]);
     } else {
-        // fallback to hardcoded qemu virt framebuffer if dtb info not found
-        fb_base = 0x40000000;
-        fb_width = 1024;
-        fb_height = 768;
-        fb_pitch = 1024 * 4;
+        // if dtb info not found, panic or use serial only
+        crash_core_panic("framebuffer info not found in dtb!\n");
     }
 
-    security_enforce_wx(fb_base, fb_height * fb_pitch, VM_PROT_READ | VM_PROT_WRITE);
+    // ensure framebuffer is mapped as read/write, non-executable
+    // security_enforce_wx(fb_base, fb_height * fb_pitch, VM_PROT_READ | VM_PROT_WRITE);
+    // the vm_maps.c now handles this directly in cpu_enable_mmu for the framebuffer region
+
     uint32_t* fb = (uint32_t*)fb_base;
     
     kprintf_init(fb, fb_width, fb_height, fb_pitch);
@@ -79,11 +81,9 @@ void kernel_main(uint64_t dtb_addr) {
     
     kprintf("astral os\n");
     
-    timer_delay_ms(5000);
+    // timer_delay_ms(5000); // removed blocking delay
     
-    for (int i = 0; i < (fb_height * fb_pitch) / 4; i++) {
-        fb[i] = 0x00000000;
-    }
+    // removed redundant framebuffer clear
 
     kprintf("> ");
     
